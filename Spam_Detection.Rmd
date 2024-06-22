@@ -1,0 +1,125 @@
+---
+title: "Spam Detection"
+output:
+  word_document: default
+  html_notebook: default
+author: Rohit Rajagopal
+---
+
+The following script utilises the SMS Spam Detection dataset from UCI to build various predictive models to categorise whether a message is spam or not. 
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(caret)
+library(rpart)
+library(randomForest)
+library(e1071)
+library(gbm)
+library(stringr)
+library(tm)
+library(qdap)
+library(textstem)
+set.seed(10)
+```
+
+Data Loading
+Read in CSV file and modify dataset as required.
+```{r}
+# Read in dataset
+sms_data <- read_csv("spam.csv")
+
+# Find dataset dimensions
+cat("Shape of Spam Dataset:", paste(dim(sms_data), collapse = "x"), "\n")
+head(sms_data)
+```
+
+```{r}
+# Remove empty columns
+sms_data <- sms_data[, -c(3, 4, 5)]
+
+# Rename remaining columns for readability
+colnames(sms_data) <- c("spam_label", "text")
+
+# Convert spam_label column into a factor 
+sms_data$spam_label <- factor(sms_data$spam_label)
+```
+
+Data Visualisation
+Let's have a look at how the dataset is distributed.
+
+```{r}
+# Find number of spam and non-spam messages
+counts <- table(sms_data$spam_label)
+print(counts)
+```
+```{r}
+# Check and convert text encoding UTF-8
+sms_data$text <- iconv(sms_data$text, to = "UTF-8", sub = "byte") 
+
+# Find number of characters in text
+character_lengths <- nchar(sms_data$text)
+
+# Create a histogram of characters in each message
+hist(character_lengths, 
+     breaks = 50,
+     main = "Distribution of Character Lengths",
+     xlab = "Number of Characters",
+     ylab = "Frequency",
+     col = "skyblue",
+     border = "white"
+)
+
+# Get summary stats
+print(summary(character_lengths))
+```
+
+```{r}
+# Find number of words in text
+word_lengths <- str_count(sms_data$text, "\\S+")
+
+# Create a histogram of words in each message
+hist(word_lengths, 
+     breaks = 50,
+     main = "Distribution of Words in Each Message",
+     xlab = "Number of Words",
+     ylab = "Frequency",
+     col = "skyblue",
+     border = "white"
+)
+
+# Get summary stats
+print(summary(word_lengths))
+```
+
+Data Preprocessing
+Clean and process text data using a standardised NLP approach, such that the models can interpret each message to predict effectively.
+
+```{r}
+# Create corpus of text column
+corp <- Corpus(VectorSource(sms_data$text))
+
+# Replace each non-alphanumeric character with " "
+clean_text <- content_transformer(function(x) gsub("[^[:alnum:]]", " ", x))
+corp <- tm_map(corp, clean_text)
+
+# Convert all text to lowercase
+corp <- tm_map(corp, content_transformer(tolower))
+
+# Remove stop words
+corp <- tm_map(corp, removeWords, stopwords("english"))
+
+# Perform stemming of words
+corp <- tm_map(corp, stemDocument)
+
+# Perform lemmatisation
+lemmatized_corpus <- sapply(corp, function(text) {
+  stem_document(tolower(text))
+})
+```
+
+
+
+
+
+
