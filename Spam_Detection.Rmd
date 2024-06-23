@@ -6,12 +6,11 @@ output:
 author: Rohit Rajagopal
 ---
 
-The following script utilises the SMS Spam Detection dataset from UCI to build various predictive models to categorise whether a message is spam or not. 
+### The following script utilises the SMS Spam Detection dataset from UCI to build various predictive models to categorise whether a message is spam or not. 
 
 ```{r}
 # Load required libraries
 library(tidyverse)
-library(caret)
 library(rpart)
 library(randomForest)
 library(e1071)
@@ -20,11 +19,17 @@ library(stringr)
 library(tm)
 library(qdap)
 library(textstem)
+library(ggplot2)
+library(wordcloud)
+library(caret)
+library(ranger)
 set.seed(10)
 ```
 
-Data Loading
+**Data Loading**
+
 Read in CSV file and modify dataset as required.
+
 ```{r}
 # Read in dataset
 sms_data <- read_csv("spam.csv")
@@ -34,18 +39,30 @@ cat("Shape of Spam Dataset:", paste(dim(sms_data), collapse = "x"), "\n")
 head(sms_data)
 ```
 
+There seem to be a few blank columns, let's check these don't contain any values at all.
+
 ```{r}
-# Remove empty columns
+# Count non-blank rows in each column using !is.na()
+non_na_counts <- colSums(sapply(sms_data, function(x) !is.na(x)))
+print(non_na_counts)
+```
+All the columns contain non-NA values, therefore let's concatenate columns 2 to 5 to form the entire message.
+
+```{r}
+# Create combined column and drop the remaining ones
+sms_data$v2 <- paste(sms_data$v2,
+                       ifelse(sms_data$...3 != "" & !is.na(sms_data$...3), sms_data$...3, ""),
+                       ifelse(sms_data$...4 != "" & !is.na(sms_data$...4), sms_data$...4, ""),
+                       ifelse(sms_data$...5 != "" & !is.na(sms_data$...5), sms_data$...5, ""),
+                       sep = " ")
 sms_data <- sms_data[, -c(3, 4, 5)]
 
 # Rename remaining columns for readability
 colnames(sms_data) <- c("spam_label", "text")
-
-# Convert spam_label column into a factor 
-sms_data$spam_label <- factor(sms_data$spam_label)
 ```
 
-Data Visualisation
+**Data Visualisation**
+
 Let's have a look at how the dataset is distributed.
 
 ```{r}
@@ -58,65 +75,231 @@ print(counts)
 sms_data$text <- iconv(sms_data$text, to = "UTF-8", sub = "byte") 
 
 # Find number of characters in text
-character_lengths <- nchar(sms_data$text)
+sms_data$char_lengths <- nchar(sms_data$text)
 
 # Create a histogram of characters in each message
-hist(character_lengths, 
-     breaks = 50,
-     main = "Distribution of Character Lengths",
-     xlab = "Number of Characters",
-     ylab = "Frequency",
-     col = "skyblue",
-     border = "white"
-)
+ggplot(sms_data, aes(x = char_lengths, fill = spam_label)) +
+  geom_histogram(binwidth = 10, position = "identity", alpha = 0.5, color = "black") +
+  labs(title = "Histogram of Character Lengths by Spam Status",
+       x = "Character Lengths",
+       y = "Frequency") +
+  scale_fill_manual(values = c("lightblue", "salmon")) +
+  theme_minimal()
 
 # Get summary stats
-print(summary(character_lengths))
+print(tapply(sms_data$char_lengths, sms_data$spam_label, summary))
 ```
 
 ```{r}
 # Find number of words in text
-word_lengths <- str_count(sms_data$text, "\\S+")
+sms_data$word_lengths <- str_count(sms_data$text, "\\S+")
 
 # Create a histogram of words in each message
-hist(word_lengths, 
-     breaks = 50,
-     main = "Distribution of Words in Each Message",
-     xlab = "Number of Words",
-     ylab = "Frequency",
-     col = "skyblue",
-     border = "white"
-)
+ggplot(sms_data, aes(x = word_lengths, fill = spam_label)) +
+  geom_histogram(binwidth = 5, position = "identity", alpha = 0.5, color = "black") +
+  labs(title = "Histogram of Word Lengths by Spam Status",
+       x = "Word Lengths",
+       y = "Frequency") +
+  scale_fill_manual(values = c("lightblue", "salmon")) + 
+  theme_minimal()
 
 # Get summary stats
-print(summary(word_lengths))
+print(tapply(sms_data$word_lengths, sms_data$spam_label, summary))
 ```
-
-Data Preprocessing
-Clean and process text data using a standardised NLP approach, such that the models can interpret each message to predict effectively.
 
 ```{r}
-# Create corpus of text column
-corp <- Corpus(VectorSource(sms_data$text))
+# Find whether each message contains numbers and if so, how many
+sms_data$has_numbers <- grepl("\\d", sms_data$text)
+sms_data$number_count <- sapply(gregexpr("\\d+", sms_data$text), function(x) sum(x > 0))
 
-# Replace each non-alphanumeric character with " "
-clean_text <- content_transformer(function(x) gsub("[^[:alnum:]]", " ", x))
-corp <- tm_map(corp, clean_text)
+# Split of spam and non-spam messages containing numbers
+number_count_splits = table(sms_data$spam_label, sms_data$has_numbers)
+cat("\n")
+print(number_count_splits)
 
-# Convert all text to lowercase
-corp <- tm_map(corp, content_transformer(tolower))
+# Create a histogram of the occurrences of numbers in each message
+ggplot(sms_data, aes(x = number_count, fill = spam_label)) +
+  geom_histogram(binwidth = 1, position = "identity", alpha = 0.5, color = "black") +
+  labs(title = "Histogram of Number by Spam Status",
+       x = "Number Occurrences",
+       y = "Frequency") +
+  scale_fill_manual(values = c("lightblue", "salmon")) + 
+  theme_minimal()
 
-# Remove stop words
-corp <- tm_map(corp, removeWords, stopwords("english"))
-
-# Perform stemming of words
-corp <- tm_map(corp, stemDocument)
-
-# Perform lemmatisation
-lemmatized_corpus <- sapply(corp, function(text) {
-  stem_document(tolower(text))
-})
+# Get summary stats
+cat("\n")
+print(tapply(sms_data$has_numbers, sms_data$spam_label, summary))
+cat("\n")
+print(tapply(sms_data$number_count, sms_data$spam_label, summary))
 ```
+
+
+```{r}
+# Find whether each message contains non-alphanumeric characters and if so, how many
+sms_data$has_non_alphanum <- grepl("[^[:alnum:]]", sms_data$text)
+sms_data$non_alphanum_count <- sapply(gregexpr("[^[:alnum:]]", sms_data$text), function(x) sum(x > 0))
+
+# Split of spam and non-spam messages containing non-alphanumeric characters
+non_alphanum_count_splits = table(sms_data$spam_label, sms_data$has_non_alphanum)
+cat("\n")
+print(non_alphanum_count_splits)
+
+# Create a histogram of the occurrences of non-alphanumeric characters in each message
+ggplot(sms_data, aes(x = non_alphanum_count, fill = spam_label)) +
+  geom_histogram(binwidth = 5, position = "identity", alpha = 0.5, color = "black") +
+  labs(title = "Histogram of Non-alphanumeric Character Occurrences by Spam Status",
+       x = "Non-alphanumeric Character Occurrences",
+       y = "Frequency") +
+  scale_fill_manual(values = c("lightblue", "salmon")) + 
+  theme_minimal()
+
+# Get summary stats
+cat("\n")
+print(tapply(sms_data$has_non_alphanum, sms_data$spam_label, summary))
+cat("\n")
+print(tapply(sms_data$non_alphanum_count, sms_data$spam_label, summary))
+```
+
+**Data Preprocessing**
+
+Clean and process text data using a standardised NLP approach (such as removing punctuation, stop words, and lemmatisation), such that the models can interpret each message correctly.
+
+```{r}
+# Create a corpus (collection of text documents)
+corpus <- Corpus(VectorSource(sms_data$text))
+
+# Convert to lowercase
+corpus <- tm_map(corpus, content_transformer(tolower))
+
+# Remove numbers and punctuation
+corpus <- tm_map(corpus, removeNumbers)
+corpus <- tm_map(corpus, removePunctuation)
+
+# Remove stopwords
+corpus <- tm_map(corpus, removeWords, stopwords("english"))
+
+# Perform lemmatisation (reduce words to their canonical or dictionary form in English)
+corpus <- tm_map(corpus, lemmatize_strings)
+
+# Remove extra white-space
+corpus <- tm_map(corpus, stripWhitespace)
+```
+
+```{r}
+# View first 5 messages in corpus to see cleaned output
+for (i in 1:5) {
+  line <- corpus[[i]][["content"]]
+  cat(line, "\n")
+}
+
+# Check whether any message is now empty
+for (i in 1:nrow(sms_data)) {
+     if (nchar(corpus[[i]][["content"]]) == 0) {
+         print(i)
+     }
+ }
+```
+
+```{r}
+# Create a Document-Term Matrix (DTM)
+dtm <- DocumentTermMatrix(corpus)
+dtm_matrix = as.matrix(dtm)
+spam_matrix <- dtm_matrix[which(sms_data$spam_label == "spam"), ]
+ham_matrix <- dtm_matrix[which(sms_data$spam_label == "ham"), ]
+
+# Convert dtm to a matrix of word frequencies
+word_freq <- colSums(dtm_matrix)
+spam_freq <- colSums(spam_matrix)
+ham_freq  <- colSums(ham_matrix)
+
+# Generate word clouds for spam and non-spam messages
+spam_messages <- head(spam_freq, 75)
+par(mfrow = c(1, 1)) 
+wordcloud(names(spam_messages), spam_messages, min.freq = 1, random.order = FALSE, colors = brewer.pal(8, "Dark2"))
+title(main = "Word Cloud for Top 75 Words used in Spam Messages")
+
+ham_messages <- head(ham_freq, 75)
+par(mfrow = c(1, 1)) 
+wordcloud(names(ham_messages), ham_messages, min.freq = 1, random.order = FALSE, colors = brewer.pal(8, "Dark2"))
+title(main = "Word Cloud for Top 75 Words used in Non-spam Messages")
+```
+
+```{r}
+# Let's remove features to simplify model creation and likely pose no significance
+#word_freq <- colSums(dtm_matrix)
+#£threshold <- quantile(word_freq, probs = 0.5)
+#top_words <- names(word_freq[word_freq >= threshold])
+#dtm <- dtm[, top_words] # Retain only top 50% of features
+
+# Compute TF-IDF weights
+dtm_tfidf <- weightTfIdf(dtm)
+
+# Convert to matrix format
+word_matrix <- as.matrix(dtm_tfidf)
+
+# Find matrix dimensions
+cat("Shape of Word Matrix:", paste(dim(word_matrix), collapse = "x"), "\n")
+```
+
+**Model Creation**
+
+Build 5 different models to predict whether a message should be classified as spam or not, and then evaluate their performance metrics.
+
+```{r}
+# Convert spam_label column to binary labels for model interpretation
+sms_data$spam_label <- ifelse(sms_data$spam_label == "spam", 1, 0)
+
+# Split data into train and test sets using a 80/20 split
+indices <- sample(nrow(word_matrix), round(0.8 * nrow(word_matrix)))
+x_train <- as.data.frame(word_matrix[indices, ])
+colnames(x_train) <- make.names(colnames(x_train))
+x_test <- as.data.frame(word_matrix[-indices, ])
+colnames(x_test) <- make.names(colnames(x_test))
+y_train <- sms_data$spam_label[indices]
+y_test <- sms_data$spam_label[-indices]
+```
+
+Define models.
+
+```{r}
+# Train Naive Bayes model
+nb_model <- naiveBayes(x_train, y_train)
+
+# Train Decision Tree model
+tree_model <- rpart(y_train ~ ., data = x_train, method = "class", control = rpart.control(maxdepth = 7))
+
+# Train Random Forest model
+rf_model <- ranger(y_train ~ ., data = x_train, num.tree = 100, mtry = sqrt(ncol(x_train)))
+
+# Train SVM model (Linear kernel)
+svm_model <- svm(x_train, y_train, kernel = "linear")
+
+# Train Gradient Boosting Machine (GBM) model
+gbm_model <- gbm(y_train ~ ., data = x_train, distribution = "bernoulli", n.trees = 100, interaction.depth = 3)
+```
+
+Predict on test set and evaluate model performance.
+
+```{r}
+# Predictions on test set
+nb_pred <- predict(nb_model, newdata = x_test)
+tree_pred <- predict(tree_model, newdata = x_test)
+rf_pred <- predict(rf_model, newdata = x_test)
+svm_pred <- predict(svm_model, newdata = x_test)
+gbm_pred <- predict(gbm_model, newdata = x_test)
+
+# Confusion matrices for test set
+confusionMatrix(nb_pred, y_test)
+confusionMatrix(tree_pred, y_test)
+confusionMatrix(rf_pred, y_test)
+confusionMatrix(svm_pred, y_test)
+confusionMatrix(gbm_pred, y_test)
+```
+
+
+
+
+
 
 
 
