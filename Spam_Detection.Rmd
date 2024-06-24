@@ -12,17 +12,12 @@ author: Rohit Rajagopal
 # Load required libraries
 library(tidyverse)
 library(rpart)
-library(randomForest)
 library(e1071)
-library(gbm)
-library(stringr)
-library(tm)
-library(qdap)
+library(ranger)
 library(textstem)
+library(tm)
 library(ggplot2)
 library(wordcloud)
-library(caret)
-library(ranger)
 set.seed(10)
 ```
 
@@ -36,7 +31,7 @@ sms_data <- read_csv("spam.csv")
 
 # Find dataset dimensions
 cat("Shape of Spam Dataset:", paste(dim(sms_data), collapse = "x"), "\n")
-head(sms_data)
+sms_data
 ```
 
 There seem to be a few blank columns, let's check these don't contain any values at all.
@@ -59,6 +54,7 @@ sms_data <- sms_data[, -c(3, 4, 5)]
 
 # Rename remaining columns for readability
 colnames(sms_data) <- c("spam_label", "text")
+sms_data
 ```
 
 **Data Visualisation**
@@ -70,12 +66,15 @@ Let's have a look at how the dataset is distributed.
 counts <- table(sms_data$spam_label)
 print(counts)
 ```
+
+Evidently, there are much more ham (non-spam) messages than spam in the dataset. This leads to extreme class imbalance and may affect the reliability of the models.
+
 ```{r}
 # Check and convert text encoding UTF-8
 sms_data$text <- iconv(sms_data$text, to = "UTF-8", sub = "byte") 
 
 # Find number of characters in text
-sms_data$char_lengths <- nchar(sms_data$text)
+char_lengths <- nchar(sms_data$text)
 
 # Create a histogram of characters in each message
 ggplot(sms_data, aes(x = char_lengths, fill = spam_label)) +
@@ -87,12 +86,14 @@ ggplot(sms_data, aes(x = char_lengths, fill = spam_label)) +
   theme_minimal()
 
 # Get summary stats
-print(tapply(sms_data$char_lengths, sms_data$spam_label, summary))
+print(tapply(char_lengths, sms_data$spam_label, summary))
 ```
+
+The plot above indicates that spam messages usually have more characters than ham, with a peak at around 150 compared to the latter at 25. The summary stats support this view.
 
 ```{r}
 # Find number of words in text
-sms_data$word_lengths <- str_count(sms_data$text, "\\S+")
+word_lengths <- str_count(sms_data$text, "\\S+")
 
 # Create a histogram of words in each message
 ggplot(sms_data, aes(x = word_lengths, fill = spam_label)) +
@@ -104,22 +105,24 @@ ggplot(sms_data, aes(x = word_lengths, fill = spam_label)) +
   theme_minimal()
 
 # Get summary stats
-print(tapply(sms_data$word_lengths, sms_data$spam_label, summary))
+print(tapply(word_lengths, sms_data$spam_label, summary))
 ```
+
+The plot above once again dictates that spam messages are likely to contain more words than their ham counterparts. The former has a mean of 24 compared to 14 for the latter.
 
 ```{r}
 # Find whether each message contains numbers and if so, how many
-sms_data$has_numbers <- grepl("\\d", sms_data$text)
-sms_data$number_count <- sapply(gregexpr("\\d+", sms_data$text), function(x) sum(x > 0))
+has_numbers <- grepl("[[:digit:]]", sms_data$text)
+number_count <- sapply(gregexpr("[[:digit:]]", sms_data$text), function(x) sum(x > 0))
 
 # Split of spam and non-spam messages containing numbers
-number_count_splits = table(sms_data$spam_label, sms_data$has_numbers)
+number_count_splits = table(sms_data$spam_label, has_numbers)
 cat("\n")
 print(number_count_splits)
 
 # Create a histogram of the occurrences of numbers in each message
 ggplot(sms_data, aes(x = number_count, fill = spam_label)) +
-  geom_histogram(binwidth = 1, position = "identity", alpha = 0.5, color = "black") +
+  geom_histogram(binwidth = 3, position = "identity", alpha = 0.5, color = "black") +
   labs(title = "Histogram of Number by Spam Status",
        x = "Number Occurrences",
        y = "Frequency") +
@@ -128,19 +131,20 @@ ggplot(sms_data, aes(x = number_count, fill = spam_label)) +
 
 # Get summary stats
 cat("\n")
-print(tapply(sms_data$has_numbers, sms_data$spam_label, summary))
+print(tapply(has_numbers, sms_data$spam_label, summary))
 cat("\n")
-print(tapply(sms_data$number_count, sms_data$spam_label, summary))
+print(tapply(number_count, sms_data$spam_label, summary))
 ```
 
+Spam messages seem to contain more numbers than ham. This likely pertains to the fact that spam messages usually contain phone numbers to dial or strange links to click on.
 
 ```{r}
 # Find whether each message contains non-alphanumeric characters and if so, how many
-sms_data$has_non_alphanum <- grepl("[^[:alnum:]]", sms_data$text)
-sms_data$non_alphanum_count <- sapply(gregexpr("[^[:alnum:]]", sms_data$text), function(x) sum(x > 0))
+has_non_alphanum <- grepl("[^[:alnum:]]", sms_data$text)
+non_alphanum_count <- sapply(gregexpr("[^[:alnum:]]", sms_data$text), function(x) sum(x > 0))
 
 # Split of spam and non-spam messages containing non-alphanumeric characters
-non_alphanum_count_splits = table(sms_data$spam_label, sms_data$has_non_alphanum)
+non_alphanum_count_splits = table(sms_data$spam_label, has_non_alphanum)
 cat("\n")
 print(non_alphanum_count_splits)
 
@@ -155,60 +159,57 @@ ggplot(sms_data, aes(x = non_alphanum_count, fill = spam_label)) +
 
 # Get summary stats
 cat("\n")
-print(tapply(sms_data$has_non_alphanum, sms_data$spam_label, summary))
+print(tapply(has_non_alphanum, sms_data$spam_label, summary))
 cat("\n")
-print(tapply(sms_data$non_alphanum_count, sms_data$spam_label, summary))
+print(tapply(non_alphanum_count, sms_data$spam_label, summary))
 ```
+
+Finally, spam messages also have more non-alphanumeric characters (punctuation, emoticons etc.) than ham. All 4 plots above suggest there is a distinct separation between the two groups which may be useful for the model building process.
 
 **Data Preprocessing**
 
 Clean and process text data using a standardised NLP approach (such as removing punctuation, stop words, and lemmatisation), such that the models can interpret each message correctly.
 
 ```{r}
-# Create a corpus (collection of text documents)
+# Create corpus of words
 corpus <- Corpus(VectorSource(sms_data$text))
 
-# Convert to lowercase
+# Convert to lower case
 corpus <- tm_map(corpus, content_transformer(tolower))
 
-# Remove numbers and punctuation
-corpus <- tm_map(corpus, removeNumbers)
-corpus <- tm_map(corpus, removePunctuation)
+# Remove punctuation
+corpus <- tm_map(corpus, content_transformer(str_replace_all), pattern = "[[:punct:]]", replacement = " ")
+
+# Remove numbers
+corpus <- tm_map(corpus, content_transformer(str_replace_all), pattern = "[[:digit:]]", replacement = " ")
 
 # Remove stopwords
-corpus <- tm_map(corpus, removeWords, stopwords("english"))
+corpus <- tm_map(corpus, removeWords, stopwords("en"))
 
 # Perform lemmatisation (reduce words to their canonical or dictionary form in English)
 corpus <- tm_map(corpus, lemmatize_strings)
 
-# Remove extra white-space
-corpus <- tm_map(corpus, stripWhitespace)
+# Remove extra white spaces
+corpus <- tm_map(corpus, content_transformer(str_replace_all), pattern = "\\s+", replacement = " ")
 ```
 
 ```{r}
-# View first 5 messages in corpus to see cleaned output
-for (i in 1:5) {
+# View first 10 messages in corpus to see cleaned output
+for (i in 1:10) {
   line <- corpus[[i]][["content"]]
   cat(line, "\n")
 }
-
-# Check whether any message is now empty
-for (i in 1:nrow(sms_data)) {
-     if (nchar(corpus[[i]][["content"]]) == 0) {
-         print(i)
-     }
- }
 ```
 
 ```{r}
-# Create a Document-Term Matrix (DTM)
-dtm <- DocumentTermMatrix(corpus)
-dtm_matrix = as.matrix(dtm)
-spam_matrix <- dtm_matrix[which(sms_data$spam_label == "spam"), ]
-ham_matrix <- dtm_matrix[which(sms_data$spam_label == "ham"), ]
+# Create a Term-Document Matrix (TDM)
+tdm <- DocumentTermMatrix(corpus)
+tdm_matrix = as.matrix(tdm)
+spam_matrix <- tdm_matrix[which(sms_data$spam_label == "spam"), ]
+ham_matrix <- tdm_matrix[which(sms_data$spam_label == "ham"), ]
 
 # Convert dtm to a matrix of word frequencies
-word_freq <- colSums(dtm_matrix)
+word_freq <- colSums(tdm_matrix)
 spam_freq <- colSums(spam_matrix)
 ham_freq  <- colSums(ham_matrix)
 
@@ -221,24 +222,20 @@ title(main = "Word Cloud for Top 75 Words used in Spam Messages")
 ham_messages <- head(ham_freq, 75)
 par(mfrow = c(1, 1)) 
 wordcloud(names(ham_messages), ham_messages, min.freq = 1, random.order = FALSE, colors = brewer.pal(8, "Dark2"))
-title(main = "Word Cloud for Top 75 Words used in Non-spam Messages")
+title(main = "Word Cloud for Top 75 Words used in Ham (Non-spam) Messages")
 ```
 
+The word clouds above show that spam messages are likely to contain words such as "text", "send", "free", and "now" as they usually involve a transfer of private information. Ham messages on the other hand, contain more conversational phrases as expected.
+
 ```{r}
-# Let's remove features to simplify model creation and likely pose no significance
-#word_freq <- colSums(dtm_matrix)
-#£threshold <- quantile(word_freq, probs = 0.5)
-#top_words <- names(word_freq[word_freq >= threshold])
-#dtm <- dtm[, top_words] # Retain only top 50% of features
+# Convert TDM to Dataframe
+tdm_df <- as.data.frame(tdm_matrix, stringsAsFactors = FALSE)
 
-# Compute TF-IDF weights
-dtm_tfidf <- weightTfIdf(dtm)
-
-# Convert to matrix format
-word_matrix <- as.matrix(dtm_tfidf)
+# Append on additional features such as character and word count, numbers, and non-alphanumeric characters
+tdm_complete = cbind("spam_label" = as.factor(sms_data$spam_label), char_lengths, word_lengths, non_alphanum_count, number_count, tdm_df)
 
 # Find matrix dimensions
-cat("Shape of Word Matrix:", paste(dim(word_matrix), collapse = "x"), "\n")
+cat("Shape of Feature Matrix:", paste(dim(tdm_complete), collapse = "x"), "\n")
 ```
 
 **Model Creation**
@@ -246,63 +243,53 @@ cat("Shape of Word Matrix:", paste(dim(word_matrix), collapse = "x"), "\n")
 Build 5 different models to predict whether a message should be classified as spam or not, and then evaluate their performance metrics.
 
 ```{r}
-# Convert spam_label column to binary labels for model interpretation
-sms_data$spam_label <- ifelse(sms_data$spam_label == "spam", 1, 0)
-
 # Split data into train and test sets using a 80/20 split
-indices <- sample(nrow(word_matrix), round(0.8 * nrow(word_matrix)))
-x_train <- as.data.frame(word_matrix[indices, ])
-colnames(x_train) <- make.names(colnames(x_train))
-x_test <- as.data.frame(word_matrix[-indices, ])
-colnames(x_test) <- make.names(colnames(x_test))
-y_train <- sms_data$spam_label[indices]
-y_test <- sms_data$spam_label[-indices]
+colnames(tdm_complete) <- c("spam_label", paste0("feature_", 1:(ncol(tdm_complete) - 1))) # Adjust column names for models
+indices <- sample(nrow(tdm_complete), round(0.8 * nrow(tdm_complete)))
+train <- as.data.frame(tdm_complete[indices, ])
+test <- as.data.frame(tdm_complete[-indices, ])
 ```
 
-Define models.
+Train models on train set, and predict on test set. Evaluate each of their performances.
 
 ```{r}
-# Train Naive Bayes model
-nb_model <- naiveBayes(x_train, y_train)
-
-# Train Decision Tree model
-tree_model <- rpart(y_train ~ ., data = x_train, method = "class", control = rpart.control(maxdepth = 7))
-
-# Train Random Forest model
-rf_model <- ranger(y_train ~ ., data = x_train, num.tree = 100, mtry = sqrt(ncol(x_train)))
-
-# Train SVM model (Linear kernel)
-svm_model <- svm(x_train, y_train, kernel = "linear")
-
-# Train Gradient Boosting Machine (GBM) model
-gbm_model <- gbm(y_train ~ ., data = x_train, distribution = "bernoulli", n.trees = 100, interaction.depth = 3)
+# Train, predict, and evaluate Naive Bayes model
+nb_model <- naiveBayes(spam_label ~ ., data = train)
+nb_pred <- predict(nb_model,  test[, -1])
+confusionMatrix(nb_pred, test$spam_label)
 ```
 
-Predict on test set and evaluate model performance.
+The Naive Bayes classifier demonstrated poor performance with an accuracy of 11.94%. It failed to correctly identify any spam messages and misclassified 981 ham messages as spam. The classifier marginally outperformed the No Information Rate (88.06%) but showed no agreement beyond chance (Kappa = 0). Sensitivity (0%) and specificity (100%) were not informative due to the lack of true positives and true negatives, respectively. These metrics collectively indicate the classifier's inadequacy, highlighting the need for significant improvement to achieve meaningful predictive performance.
 
 ```{r}
-# Predictions on test set
-nb_pred <- predict(nb_model, newdata = x_test)
-tree_pred <- predict(tree_model, newdata = x_test)
-rf_pred <- predict(rf_model, newdata = x_test)
-svm_pred <- predict(svm_model, newdata = x_test)
-gbm_pred <- predict(gbm_model, newdata = x_test)
-
-# Confusion matrices for test set
-confusionMatrix(nb_pred, y_test)
-confusionMatrix(tree_pred, y_test)
-confusionMatrix(rf_pred, y_test)
-confusionMatrix(svm_pred, y_test)
-confusionMatrix(gbm_pred, y_test)
+# Train, predict, and evaluate Decision Tree model
+tree_model <- rpart(spam_label ~ ., data = train, method = "class")
+tree_pred <- predict(tree_model,  test[, -1], type = "class")
+confusionMatrix(tree_pred, test$spam_label)
 ```
 
+The Decision Tree model achieved an impressive accuracy rate of 97.31%, correctly categorising 962 ham messages and 122 spam messages. It encountered a challenge in misclassifying 19 ham messages as spam. Beyond simply exceeding the No Information Rate (88.06%), the model's Kappa coefficient of 0.8752 signifies a substantial level of agreement beyond chance. Notably, its sensitivity of 98.06% and specificity of 91.73% underscore its adeptness in identifying both spam and ham messages, respectively. Additionally, with a positive predictive value of 98.87% and a perfect negative predictive value of 86.52%, the model consistently demonstrated its reliability in predicting message classifications.
 
+```{r}
+# Train, predict, and evaluate  Random Forest model
+rf_model <- ranger(spam_label ~ ., data = train, num.trees = 100, mtry = sqrt(ncol(train) - 1))
+rf_pred <- predict(rf_model,  test[, -1])$predictions
+confusionMatrix(rf_pred, test$spam_label)
+```
 
+The Random Forest classifier achieved a commendable accuracy rate of 98.83%, accurately identifying 981 ham messages and 120 spam messages. Only 13 spam messages were misclassified, showcasing its strong performance. Surpassing the No Information Rate (88.06%) with a Kappa value of 0.9421, the model substantiates a robust level of agreement beyond chance. Notably, with sensitivity at 100% and specificity at 90.23%, the classifier effectively differentiated between ham and spam messages. Further validation came from its positive predictive value of 98.69% and negative predictive value of 100%, reaffirming its precision in predicting message categories.
 
+```{r}
+# Train, predict, and evaluate  SVM model (Linear kernel)
+svm_model <- svm(spam_label ~ ., data = train, scale = FALSE, kernel = 'linear')
+svm_pred <- predict(svm_model,  test[, -1])
+confusionMatrix(svm_pred, test$spam_label)
+```
 
+The SVM (linear kernel) delivered an outstanding accuracy of 99.28%, accurately classifying 976 ham messages and 130 spam messages. It encountered minimal misclassification, with only 3 ham messages and 5 spam messages inaccurately labeled. Demonstrating superior performance over the No Information Rate (88.06%) with a Kappa coefficient of 0.9661, the model achieved significant agreement beyond chance. Its sensitivity and specificity were robust at 99.49% and 97.74%, respectively, illustrating its effectiveness in distinguishing between ham and spam messages. Moreover, with a positive predictive value of 99.69% and a negative predictive value of 96.30%, the SVM's accuracy in predicting message categories was notably high, making it the most comprehensive model across all evaluated metrics.
 
+**Results**
 
+Apart from the Naive Bayes Classifier, the other models performed extremely well on the SMS Spam Detection dataset. SVM (linear kernel) was the best model across both spam and ham messages. 
 
-
-
-
+However, the dataset was collected from messages dating back to 2006 and 2007 in the UK, Singapore, and the US, and may not accurately reflect current classifications due to changes in messaging habits and vocabulary. Initial data extraction relied on user reports from a website, introducing self-selection bias with potentially exaggerated accuracy in spam classification. The data's limited geographic scope and regional speech patterns hinder its global applicability for spam detection. Therefore, using this dataset alone for developing a spam detection model lacks the necessary diversity and broader representation needed for reliable results across different populations. To improve the generalisability of the models above, it is pertinent that a larger and more robust dataset is compiled.
