@@ -23,7 +23,7 @@ set.seed(10)
 
 **Data Loading**
 
-Read in CSV file and modify dataset as required.
+Read in CSV file and modify dataset as required. Data obtained from https://www.kaggle.com/datasets/uciml/sms-spam-collection-dataset.
 
 ```{r}
 # Read in dataset
@@ -290,6 +290,6 @@ The SVM (linear kernel) delivered an outstanding accuracy of 99.28%, accurately 
 
 **Results**
 
-Apart from the Naive Bayes Classifier, the other models performed extremely well on the SMS Spam Detection dataset. SVM (linear kernel) was the best model across both spam and ham messages. 
+Apart from the Naive Bayes Classifier, the other models performed extremely well on the SMS Spam Detection dataset. SVM (linear kernel) was the best model across both spam and ham messages
 
 However, the dataset was collected from messages dating back to 2006 and 2007 in the UK, Singapore, and the US, and may not accurately reflect current classifications due to changes in messaging habits and vocabulary. Initial data extraction relied on user reports from a website, introducing self-selection bias with potentially exaggerated accuracy in spam classification. The data's limited geographic scope and regional speech patterns hinder its global applicability for spam detection. Therefore, using this dataset alone for developing a spam detection model lacks the necessary diversity and broader representation needed for reliable results across different populations. To improve the generalisability of the models above, it is pertinent that a larger and more robust dataset is compiled.
