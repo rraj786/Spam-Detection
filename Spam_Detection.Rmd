@@ -6,7 +6,7 @@ output:
 author: Rohit Rajagopal
 ---
 
-### The following script utilises the SMS Spam Detection dataset from UCI to build various predictive models to categorise whether a message is spam or not. 
+#### The following script utilises the SMS Spam Detection dataset from UCI to build various predictive models to categorise whether a message is spam or not. 
 
 ```{r}
 # Load required libraries
@@ -21,7 +21,7 @@ library(wordcloud)
 set.seed(10)
 ```
 
-**Data Loading**
+### Data Loading
 
 Read in CSV file and modify dataset as required. Data obtained from https://www.kaggle.com/datasets/uciml/sms-spam-collection-dataset.
 
@@ -57,7 +57,7 @@ colnames(sms_data) <- c("spam_label", "text")
 sms_data
 ```
 
-**Data Visualisation**
+### Data Visualisation
 
 Let's have a look at how the dataset is distributed.
 
@@ -117,7 +117,6 @@ number_count <- sapply(gregexpr("[[:digit:]]", sms_data$text), function(x) sum(x
 
 # Split of spam and non-spam messages containing numbers
 number_count_splits = table(sms_data$spam_label, has_numbers)
-cat("\n")
 print(number_count_splits)
 
 # Create a histogram of the occurrences of numbers in each message
@@ -130,9 +129,7 @@ ggplot(sms_data, aes(x = number_count, fill = spam_label)) +
   theme_minimal()
 
 # Get summary stats
-cat("\n")
 print(tapply(has_numbers, sms_data$spam_label, summary))
-cat("\n")
 print(tapply(number_count, sms_data$spam_label, summary))
 ```
 
@@ -145,7 +142,6 @@ non_alphanum_count <- sapply(gregexpr("[^[:alnum:]]", sms_data$text), function(x
 
 # Split of spam and non-spam messages containing non-alphanumeric characters
 non_alphanum_count_splits = table(sms_data$spam_label, has_non_alphanum)
-cat("\n")
 print(non_alphanum_count_splits)
 
 # Create a histogram of the occurrences of non-alphanumeric characters in each message
@@ -158,15 +154,13 @@ ggplot(sms_data, aes(x = non_alphanum_count, fill = spam_label)) +
   theme_minimal()
 
 # Get summary stats
-cat("\n")
 print(tapply(has_non_alphanum, sms_data$spam_label, summary))
-cat("\n")
 print(tapply(non_alphanum_count, sms_data$spam_label, summary))
 ```
 
 Finally, spam messages also have more non-alphanumeric characters (punctuation, emoticons etc.) than ham. All 4 plots above suggest there is a distinct separation between the two groups which may be useful for the model building process.
 
-**Data Preprocessing**
+### Data Preprocessing
 
 Clean and process text data using a standardised NLP approach (such as removing punctuation, stop words, and lemmatisation), such that the models can interpret each message correctly.
 
@@ -219,6 +213,7 @@ par(mfrow = c(1, 1))
 wordcloud(names(spam_messages), spam_messages, min.freq = 1, random.order = FALSE, colors = brewer.pal(8, "Dark2"))
 title(main = "Word Cloud for Top 75 Words used in Spam Messages")
 
+# Display word clouds
 ham_messages <- head(ham_freq, 75)
 par(mfrow = c(1, 1)) 
 wordcloud(names(ham_messages), ham_messages, min.freq = 1, random.order = FALSE, colors = brewer.pal(8, "Dark2"))
@@ -238,7 +233,7 @@ tdm_complete = cbind("spam_label" = as.factor(sms_data$spam_label), char_lengths
 cat("Shape of Feature Matrix:", paste(dim(tdm_complete), collapse = "x"), "\n")
 ```
 
-**Model Creation**
+### Model Creation
 
 Build 5 different models to predict whether a message should be classified as spam or not, and then evaluate their performance metrics.
 
@@ -288,7 +283,7 @@ confusionMatrix(svm_pred, test$spam_label)
 
 The SVM (linear kernel) delivered an outstanding accuracy of 99.28%, accurately classifying 976 ham messages and 130 spam messages. It encountered minimal misclassification, with only 3 ham messages and 5 spam messages inaccurately labeled. Demonstrating superior performance over the No Information Rate (88.06%) with a Kappa coefficient of 0.9661, the model achieved significant agreement beyond chance. Its sensitivity and specificity were robust at 99.49% and 97.74%, respectively, illustrating its effectiveness in distinguishing between ham and spam messages. Moreover, with a positive predictive value of 99.69% and a negative predictive value of 96.30%, the SVM's accuracy in predicting message categories was notably high, making it the most comprehensive model across all evaluated metrics.
 
-**Results**
+### Results
 
 Apart from the Naive Bayes Classifier, the other models performed extremely well on the SMS Spam Detection dataset. SVM (linear kernel) was the best model across both spam and ham messages
 
